@@ -6,7 +6,7 @@ import time
 EMAIL="haanhtuanetsy@gmail.com"
 PASSWORD="unaciiagaapxsoux"
 
-BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY."
+BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
 CHAT_ID="7242802148"
 
 

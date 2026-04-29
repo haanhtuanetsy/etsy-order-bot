@@ -1,8 +1,8 @@
 import imaplib
 import email
-import requests
-import time
 import os
+import time
+import requests
 from bs4 import BeautifulSoup
 
 EMAIL = os.environ.get("haanhtuanetsy@gmail.com")
@@ -11,8 +11,20 @@ BOT_TOKEN = os.environ.get("8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY")
 CHAT_ID = os.environ.get("7242802148")
 
 
-def send_photo(photo, caption):
+def send_message(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
+    requests.post(
+        url,
+        data={
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }
+    )
+
+
+def send_photo(photo, caption):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
     requests.post(
@@ -26,21 +38,9 @@ def send_photo(photo, caption):
     )
 
 
-def send_message(text):
-
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
-    )
-
-
 def get_html(msg):
+
+    html = None
 
     if msg.is_multipart():
 
@@ -48,15 +48,101 @@ def get_html(msg):
 
             if part.get_content_type() == "text/html":
 
-                return part.get_payload(decode=True).decode(errors="ignore")
+                html = part.get_payload(decode=True)
+
+                if html:
+                    return html.decode(errors="ignore")
 
     else:
 
         if msg.get_content_type() == "text/html":
 
-            return msg.get_payload(decode=True).decode(errors="ignore")
+            html = msg.get_payload(decode=True)
+
+            if html:
+                return html.decode(errors="ignore")
 
     return ""
+
+
+def find_product(soup):
+
+    # thử tìm product title trong h1/h2/h3
+    for tag in soup.find_all(["h1", "h2", "h3"]):
+
+        text = tag.get_text().strip()
+
+        if len(text) > 6 and "etsy" not in text.lower():
+
+            return text
+
+    return "Unknown"
+
+
+def find_total(lines):
+
+    for l in lines:
+
+        if "$" in l and "." in l and len(l) < 20:
+
+            return l.strip()
+
+    return "Unknown"
+
+
+def find_personalization(lines):
+
+    for l in lines:
+
+        if "Personalization" in l:
+
+            return l.replace("Personalization:", "").strip()
+
+    return "None"
+
+
+def find_shipping(lines):
+
+    start = False
+    addr = []
+
+    for l in lines:
+
+        if "Ship to" in l or "Shipping address" in l:
+
+            start = True
+            continue
+
+        if start:
+
+            if len(addr) < 6:
+
+                addr.append(l)
+
+            else:
+                break
+
+    if addr:
+
+        return "\n".join(addr)
+
+    return "Unknown"
+
+
+def find_image(soup):
+
+    for img in soup.find_all("img"):
+
+        src = img.get("src")
+
+        if not src:
+            continue
+
+        if "etsyimg.com" in src:
+
+            return src
+
+    return None
 
 
 def parse_email(html):
@@ -67,67 +153,17 @@ def parse_email(html):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    product = "Unknown"
-    total = "Unknown"
-    shipping = "Unknown"
-    personalization = "None"
-    image = None
+    product = find_product(soup)
 
-    # PRODUCT
-    for tag in soup.find_all("h1"):
-        t = tag.get_text().strip()
+    total = find_total(lines)
 
-        if len(t) > 5 and "etsy" not in t.lower():
-            product = t
-            break
+    personalization = find_personalization(lines)
 
-    # TOTAL
-    for l in lines:
+    shipping = find_shipping(lines)
 
-        if "$" in l and "." in l:
+    image = find_image(soup)
 
-            total = l
-            break
-
-    # PERSONALIZATION
-    for l in lines:
-
-        if "Personalization" in l:
-
-            personalization = l.replace("Personalization:", "").strip()
-
-    # SHIPPING ADDRESS
-    start = False
-    addr = []
-
-    for l in lines:
-
-        if "Ship to" in l or "Shipping address" in l:
-            start = True
-            continue
-
-        if start:
-
-            if len(addr) < 6:
-                addr.append(l)
-
-    if addr:
-        shipping = "\n".join(addr)
-
-    # PRODUCT IMAGE (lọc đúng ảnh Etsy)
-    for img in soup.find_all("img"):
-
-        src = img.get("src")
-
-        if not src:
-            continue
-
-        if "etsyimg.com" in src and "75x75" not in src:
-
-            image = src
-            break
-
-    return product, total, shipping, personalization, image
+    return product, total, personalization, shipping, image
 
 
 def check_orders():
@@ -146,16 +182,16 @@ def check_orders():
 
         status, msg_data = mail.fetch(num, "(RFC822)")
 
-        raw = msg_data[0][1]
+        raw_email = msg_data[0][1]
 
-        msg = email.message_from_bytes(raw)
+        msg = email.message_from_bytes(raw_email)
 
         html = get_html(msg)
 
         if not html:
             continue
 
-        product, total, shipping, personalization, image = parse_email(html)
+        product, total, personalization, shipping, image = parse_email(html)
 
         caption = f"""
 🛒 <b>NEW ETSY ORDER</b>
@@ -173,13 +209,19 @@ def check_orders():
 {shipping}
 """
 
-        if image:
+        try:
 
-            send_photo(image, caption)
+            if image:
 
-        else:
+                send_photo(image, caption)
 
-            send_message(caption)
+            else:
+
+                send_message(caption)
+
+        except Exception as e:
+
+            print("Send error:", e)
 
     mail.logout()
 

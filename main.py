@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 EMAIL = os.environ.get("haanhtuanetsy@gmail.com")
-PASSWORD = os.environ.get("slzzfsvttjqpjykt")
+PASSWORD = os.environ.get("lgjuymixrdsvkmvp")
 BOT_TOKEN = os.environ.get("8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY")
 CHAT_ID = os.environ.get("7242802148")
 

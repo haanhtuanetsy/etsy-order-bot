@@ -2,26 +2,40 @@ import imaplib
 import email
 import requests
 import time
+import os
 from bs4 import BeautifulSoup
 
-EMAIL="haanhtuanetsy@gmail.com"
-PASSWORD="slzzfsvttjqpjykt"
-
-BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzYN"
-CHAT_ID="7242802148"
+EMAIL = os.environ.get("haanhtuanetsy@gmail.com")
+PASSWORD = os.environ.get("slzzfsvttjqpjykt")
+BOT_TOKEN = os.environ.get("8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY")
+CHAT_ID = os.environ.get("7242802148")
 
 
 def send_photo(photo, caption):
 
-    url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
     requests.post(
         url,
         data={
-            "chat_id":CHAT_ID,
-            "photo":photo,
-            "caption":caption,
-            "parse_mode":"HTML"
+            "chat_id": CHAT_ID,
+            "photo": photo,
+            "caption": caption,
+            "parse_mode": "HTML"
+        }
+    )
+
+
+def send_message(text):
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+    requests.post(
+        url,
+        data={
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
         }
     )
 
@@ -32,122 +46,119 @@ def get_html(msg):
 
         for part in msg.walk():
 
-            if part.get_content_type()=="text/html":
+            if part.get_content_type() == "text/html":
 
                 return part.get_payload(decode=True).decode(errors="ignore")
 
     else:
 
-        return msg.get_payload(decode=True).decode(errors="ignore")
+        if msg.get_content_type() == "text/html":
+
+            return msg.get_payload(decode=True).decode(errors="ignore")
 
     return ""
 
 
 def parse_email(html):
 
-    soup=BeautifulSoup(html,"html.parser")
+    soup = BeautifulSoup(html, "html.parser")
 
-    text=soup.get_text("\n")
+    text = soup.get_text("\n")
 
-    lines=[i.strip() for i in text.split("\n") if i.strip()]
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    shop="Unknown"
-    product="Unknown"
-    total="Unknown"
-    buyer_address="Unknown"
-    personalization="None"
+    product = "Unknown"
+    total = "Unknown"
+    shipping = "Unknown"
+    personalization = "None"
+    image = None
 
-    # SHOP
-    for l in lines:
-        if "from" in l.lower() and "shop" in l.lower():
-            shop=l.replace("Shop","").replace("from","").strip()
+    # PRODUCT
+    for tag in soup.find_all("h1"):
+        t = tag.get_text().strip()
+
+        if len(t) > 5 and "etsy" not in t.lower():
+            product = t
+            break
 
     # TOTAL
     for l in lines:
-        if "$" in l and "." in l and len(l)<20:
-            total=l
-            break
 
-    # PRODUCT
-    for tag in soup.find_all(["h1","h2","h3"]):
-        t=tag.get_text().strip()
-        if len(t)>5 and "etsy" not in t.lower():
-            product=t
+        if "$" in l and "." in l:
+
+            total = l
             break
 
     # PERSONALIZATION
     for l in lines:
-        if "Personalization" in l:
-            personalization=l.replace("Personalization","").strip()
 
-    # BUYER + ADDRESS
-    start=False
-    addr=[]
+        if "Personalization" in l:
+
+            personalization = l.replace("Personalization:", "").strip()
+
+    # SHIPPING ADDRESS
+    start = False
+    addr = []
 
     for l in lines:
 
         if "Ship to" in l or "Shipping address" in l:
-            start=True
+            start = True
             continue
 
         if start:
 
-            if len(addr)<5:
+            if len(addr) < 6:
                 addr.append(l)
 
-            else:
-                break
-
     if addr:
-        buyer_address="\n".join(addr)
+        shipping = "\n".join(addr)
 
-    # IMAGE
-    img=None
+    # PRODUCT IMAGE (lọc đúng ảnh Etsy)
+    for img in soup.find_all("img"):
 
-    for tag in soup.find_all("img"):
+        src = img.get("src")
 
-        src=tag.get("src") or tag.get("data-src")
+        if not src:
+            continue
 
-        if src and "etsy" in src:
+        if "etsyimg.com" in src and "75x75" not in src:
 
-            img=src
+            image = src
             break
 
-    return shop,product,total,buyer_address,personalization,img
+    return product, total, shipping, personalization, image
 
 
 def check_orders():
 
-    mail=imaplib.IMAP4_SSL("imap.gmail.com")
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
 
-    mail.login(EMAIL,PASSWORD)
+    mail.login(EMAIL, PASSWORD)
 
     mail.select("inbox")
 
-    status,data=mail.search(None,'(UNSEEN FROM "etsy")')
+    status, data = mail.search(None, '(UNSEEN FROM "etsy")')
 
-    ids=data[0].split()
+    ids = data[0].split()
 
     for num in ids:
 
-        status,msg_data=mail.fetch(num,"(RFC822)")
+        status, msg_data = mail.fetch(num, "(RFC822)")
 
-        raw=msg_data[0][1]
+        raw = msg_data[0][1]
 
-        msg=email.message_from_bytes(raw)
+        msg = email.message_from_bytes(raw)
 
-        html=get_html(msg)
+        html = get_html(msg)
 
         if not html:
             continue
 
-        shop,product,total,buyer_address,personalization,img=parse_email(html)
+        product, total, shipping, personalization, image = parse_email(html)
 
-        caption=f"""
+        caption = f"""
 🛒 <b>NEW ETSY ORDER</b>
-
-🏪 Shop:
-{shop}
 
 📦 Product:
 {product}
@@ -158,41 +169,31 @@ def check_orders():
 💰 Total:
 {total}
 
-🏠 Shipping:
-{buyer_address}
+🏠 Shipping address:
+{shipping}
 """
 
-        if img:
+        if image:
 
-            send_photo(img,caption)
+            send_photo(image, caption)
 
         else:
 
-            url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-            requests.post(
-                url,
-                data={
-                    "chat_id":CHAT_ID,
-                    "text":caption,
-                    "parse_mode":"HTML"
-                }
-            )
+            send_message(caption)
 
     mail.logout()
-
 
 
 while True:
 
     try:
 
-        print("Checking orders...")
+        print("Checking Etsy orders...")
 
         check_orders()
 
     except Exception as e:
 
-        print(e)
+        print("Error:", e)
 
     time.sleep(60)

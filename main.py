@@ -40,7 +40,7 @@ def check_orders():
 
     status,messages=mail.search(
         None,
-        '(UNSEEN SUBJECT "You made a sale")'
+        'UNSEEN'
     )
 
 

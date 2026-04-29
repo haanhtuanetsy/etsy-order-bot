@@ -11,189 +11,220 @@ BOT_TOKEN = os.environ.get("8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY")
 CHAT_ID = os.environ.get("7242802148")
 
 
-def send_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-    requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
-    )
+def send_message(text):
+
+url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+requests.post(
+url,
+data={
+"chat_id": CHAT_ID,
+"text": text,
+"parse_mode": "HTML"
+}
+)
 
 
 def send_photo(photo, caption):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
-    requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "photo": photo,
-            "caption": caption,
-            "parse_mode": "HTML"
-        }
-    )
+url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+
+requests.post(
+url,
+data={
+"chat_id": CHAT_ID,
+"photo": photo,
+"caption": caption,
+"parse_mode": "HTML"
+}
+)
 
 
 def get_html(msg):
 
-    html = None
+html = None
 
-    if msg.is_multipart():
+if msg.is_multipart():
 
-        for part in msg.walk():
+for part in msg.walk():
 
-            if part.get_content_type() == "text/html":
+if part.get_content_type() == "text/html":
 
-                html = part.get_payload(decode=True)
+html = part.get_payload(decode=True)
 
-                if html:
-                    return html.decode(errors="ignore")
+if html:
 
-    else:
+return html.decode(errors="ignore")
 
-        if msg.get_content_type() == "text/html":
+else:
 
-            html = msg.get_payload(decode=True)
+if msg.get_content_type() == "text/html":
 
-            if html:
-                return html.decode(errors="ignore")
+html = msg.get_payload(decode=True)
 
-    return ""
+if html:
+
+return html.decode(errors="ignore")
+
+return ""
 
 
 def find_product(soup):
 
-    # thử tìm product title trong h1/h2/h3
-    for tag in soup.find_all(["h1", "h2", "h3"]):
+try:
 
-        text = tag.get_text().strip()
+for tag in soup.find_all(["h1", "h2", "h3"]):
 
-        if len(text) > 6 and "etsy" not in text.lower():
+text = tag.get_text()
 
-            return text
+if text and len(text) > 6 and "etsy" not in text.lower():
 
-    return "Unknown"
+return text.strip()
+
+except:
+pass
+
+return "Unknown product"
 
 
 def find_total(lines):
 
-    for l in lines:
+try:
 
-        if "$" in l and "." in l and len(l) < 20:
+for l in lines:
 
-            return l.strip()
+if "$" in l and "." in l and len(l) < 20:
 
-    return "Unknown"
+return l.strip()
+
+except:
+pass
+
+return "Unknown"
 
 
 def find_personalization(lines):
 
-    for l in lines:
+try:
 
-        if "Personalization" in l:
+for l in lines:
 
-            return l.replace("Personalization:", "").strip()
+if "personalization" in l.lower():
 
-    return "None"
+return l
+
+except:
+pass
+
+return "None"
 
 
 def find_shipping(lines):
 
-    start = False
-    addr = []
+try:
 
-    for l in lines:
+start = False
+addr = []
 
-        if "Ship to" in l or "Shipping address" in l:
+for l in lines:
 
-            start = True
-            continue
+if "ship to" in l.lower() or "shipping address" in l.lower():
 
-        if start:
+start = True
+continue
 
-            if len(addr) < 6:
+if start:
 
-                addr.append(l)
+if len(addr) < 6:
 
-            else:
-                break
+addr.append(l)
 
-    if addr:
+else:
 
-        return "\n".join(addr)
+break
 
-    return "Unknown"
+if addr:
+
+return "\n".join(addr)
+
+except:
+pass
+
+return "Unknown"
 
 
 def find_image(soup):
 
-    for img in soup.find_all("img"):
+try:
 
-        src = img.get("src")
+for img in soup.find_all("img"):
 
-        if not src:
-            continue
+src = img.get("src")
 
-        if "etsyimg.com" in src:
+if not src:
+continue
 
-            return src
+if "etsyimg.com" in src:
 
-    return None
+return src
+
+except:
+pass
+
+return None
 
 
 def parse_email(html):
 
-    soup = BeautifulSoup(html, "html.parser")
+soup = BeautifulSoup(html, "html.parser")
 
-    text = soup.get_text("\n")
+text = soup.get_text("\n")
 
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    product = find_product(soup)
+product = find_product(soup)
 
-    total = find_total(lines)
+total = find_total(lines)
 
-    personalization = find_personalization(lines)
+personalization = find_personalization(lines)
 
-    shipping = find_shipping(lines)
+shipping = find_shipping(lines)
 
-    image = find_image(soup)
+image = find_image(soup)
 
-    return product, total, personalization, shipping, image
+return product, total, personalization, shipping, image
 
 
 def check_orders():
 
-    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+mail = imaplib.IMAP4_SSL("imap.gmail.com")
 
-    mail.login(EMAIL, PASSWORD)
+mail.login(EMAIL, PASSWORD)
 
-    mail.select("inbox")
+mail.select("inbox")
 
-    status, data = mail.search(None, '(UNSEEN FROM "etsy")')
+status, data = mail.search(None, '(UNSEEN FROM "etsy")')
 
-    ids = data[0].split()
+ids = data[0].split()
 
-    for num in ids:
+for num in ids:
 
-        status, msg_data = mail.fetch(num, "(RFC822)")
+status, msg_data = mail.fetch(num, "(RFC822)")
 
-        raw_email = msg_data[0][1]
+raw_email = msg_data[0][1]
 
-        msg = email.message_from_bytes(raw_email)
+msg = email.message_from_bytes(raw_email)
 
-        html = get_html(msg)
+html = get_html(msg)
 
-        if not html:
-            continue
+if not html:
 
-        product, total, personalization, shipping, image = parse_email(html)
+continue
 
-        caption = f"""
+product, total, personalization, shipping, image = parse_email(html)
+
+caption = f"""
 🛒 <b>NEW ETSY ORDER</b>
 
 📦 Product:
@@ -209,33 +240,33 @@ def check_orders():
 {shipping}
 """
 
-        try:
+try:
 
-            if image:
+if image:
 
-                send_photo(image, caption)
+send_photo(image, caption)
 
-            else:
+else:
 
-                send_message(caption)
+send_message(caption)
 
-        except Exception as e:
+except Exception as e:
 
-            print("Send error:", e)
+print("Send error:", e)
 
-    mail.logout()
+mail.logout()
 
 
 while True:
 
-    try:
+try:
 
-        print("Checking Etsy orders...")
+print("Checking Etsy orders...")
 
-        check_orders()
+check_orders()
 
-    except Exception as e:
+except Exception as e:
 
-        print("Error:", e)
+print("Error:", e)
 
-    time.sleep(60)
+time.sleep(60)

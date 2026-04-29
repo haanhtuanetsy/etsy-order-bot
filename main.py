@@ -6,11 +6,12 @@ import os
 import re
 from bs4 import BeautifulSoup
 
-EMAIL = os.getenv("EMAIL")
-PASSWORD = os.getenv("PASSWORD")
+EMAIL="haanhtuanetsy@gmail.com"
+PASSWORD="unaciiagaapxsoux"
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
+CHAT_ID="7242802148"
+
 
 processed_orders = set()
 

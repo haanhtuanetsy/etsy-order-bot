@@ -5,7 +5,7 @@ import time
 import re
 
 EMAIL = "haanhtuanetsy@gmail.com"
-PASSWORD = "unaciiagaapxsouxD"
+PASSWORD = "slzzfsvttjqpjykt"
 
 BOT_TOKEN = "8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
 CHAT_ID = "7242802148"

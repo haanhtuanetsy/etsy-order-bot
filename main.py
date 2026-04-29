@@ -2,10 +2,7 @@ import imaplib
 import email
 import requests
 import time
-import re
 from bs4 import BeautifulSoup
-
-# ===== CONFIG =====
 
 EMAIL = "haanhtuanetsy@gmail.com"
 PASSWORD = "slzzfsvttjqpjykt"
@@ -13,8 +10,6 @@ PASSWORD = "slzzfsvttjqpjykt"
 BOT_TOKEN = "8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
 CHAT_ID = "7242802148"
 
-
-# ===== TELEGRAM SEND PHOTO =====
 
 def send_photo(photo, caption):
 
@@ -31,23 +26,7 @@ def send_photo(photo, caption):
     )
 
 
-# ===== REGEX HELPER =====
-
-def extract(regex, text):
-
-    match = re.search(regex, text, re.I)
-
-    if match:
-        return match.group(1).strip()
-
-    return "Unknown"
-
-
-# ===== GET HTML EMAIL =====
-
 def get_html(msg):
-
-    html = None
 
     if msg.is_multipart():
 
@@ -55,70 +34,88 @@ def get_html(msg):
 
             if part.get_content_type() == "text/html":
 
-                payload = part.get_payload(decode=True)
-
-                if payload:
-                    html = payload.decode(errors="ignore")
+                return part.get_payload(decode=True).decode(errors="ignore")
 
     else:
 
-        payload = msg.get_payload(decode=True)
+        return msg.get_payload(decode=True).decode(errors="ignore")
 
-        if payload:
-            html = payload.decode(errors="ignore")
+    return None
 
-    return html
-
-
-# ===== PARSE ETSY EMAIL =====
 
 def parse_etsy(html):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    text = soup.get_text(" ")
+    text = soup.get_text("\n")
 
-    # Buyer
-    buyer = extract(r"Buyer\s*:\s*(.*?)\s", text)
+    buyer = "Unknown"
+    total = "Unknown"
+    shipping = "Unknown"
+    title = "Unknown"
+    personalization = "None"
 
-    # Total
-    total = extract(r"Order total\s*\$?([\d\.,]+)", text)
+    # ===== Buyer =====
 
-    # Shipping
-    shipping = extract(r"Ship to\s*(.*?)\s", text)
+    for line in text.split("\n"):
 
-    # Transaction
-    transaction = extract(r"Transaction ID:\s*(\d+)", text)
+        if "Buyer" in line:
 
-    # Shop name
-    shop = extract(r"Shop\s*:\s*(.*?)\s", text)
+            buyer = line.replace("Buyer", "").strip()
 
-    # Product title
-    title = extract(r"Item\s*:\s*(.*?)\s", text)
+    # ===== Total =====
 
-    # PERSONALIZATION
-    personalization = extract(r"Personalization\s*:\s*(.*?)\s{2,}", text)
+        if "$" in line and "." in line and len(line) < 15:
 
-    if personalization == "Unknown":
-        personalization = extract(r"Personalization\s*(.*?)\s{2,}", text)
+            total = line.strip()
 
-    # IMAGE HD
-    img = None
+    # ===== Shipping =====
 
-    for i in soup.find_all("img"):
+        if "United States" in line or "USA" in line:
 
-        src = i.get("src")
+            shipping = line.strip()
 
-        if src and "etsy" in src:
+    # ===== Product Title =====
 
-            img = src.replace("il_75x75", "il_570xN")
+        if "SIZE" in line or "Sneaker" in line:
+
+            title = line.strip()
+
+    # ===== Personalization =====
+
+        if "Personalization" in line:
+
+            personalization = line.replace("Personalization", "").strip()
+
+    # ===== Transaction =====
+
+    transaction = None
+
+    for link in soup.find_all("a"):
+
+        href = link.get("href")
+
+        if href and "transaction_id=" in href:
+
+            transaction = href.split("transaction_id=")[1]
 
             break
 
-    return buyer, total, shipping, transaction, shop, title, img, personalization
+    # ===== Image =====
 
+    img = None
 
-# ===== CHECK ETSY ORDERS =====
+    for tag in soup.find_all("img"):
+
+        src = tag.get("src")
+
+        if src and "etsy" in src:
+
+            img = src
+            break
+
+    return buyer, total, shipping, title, personalization, transaction, img
+
 
 def check_orders():
 
@@ -128,10 +125,7 @@ def check_orders():
 
     mail.select("inbox")
 
-    status, data = mail.search(
-        None,
-        '(UNSEEN SUBJECT "You made a sale on Etsy")'
-    )
+    status, data = mail.search(None, '(UNSEEN SUBJECT "You made a sale on Etsy")')
 
     ids = data[0].split()
 
@@ -148,45 +142,43 @@ def check_orders():
         if not html:
             continue
 
-        buyer, total, shipping, transaction, shop, title, img, personalization = parse_etsy(html)
+        buyer, total, shipping, title, personalization, transaction, img = parse_etsy(html)
 
         order_link = f"https://www.etsy.com/your/orders/sold?transaction_id={transaction}"
 
         caption = f"""
 🛒 <b>NEW ETSY ORDER</b>
 
-🏪 <b>Shop:</b>
-{shop}
+🏪 Shop: Festifast
 
-📦 <b>Product:</b>
+📦 Product:
 {title}
 
-✏️ <b>Personalization:</b>
+✏️ Personalization:
 {personalization}
 
-👤 <b>Buyer:</b>
+👤 Buyer:
 {buyer}
 
-💰 <b>Total:</b>
-${total}
+💰 Total:
+{total}
 
-🏠 <b>Shipping:</b>
+🏠 Shipping:
 {shipping}
 
-🔢 <b>Transaction:</b>
+🔢 Transaction:
 {transaction}
 
-🔗 <b>Order Link:</b>
+🔗 Order:
 {order_link}
 """
 
         if img:
+
             send_photo(img, caption)
 
     mail.logout()
 
-
-# ===== LOOP =====
 
 while True:
 

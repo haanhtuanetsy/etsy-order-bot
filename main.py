@@ -3,6 +3,9 @@ import email
 import requests
 import time
 import re
+from bs4 import BeautifulSoup
+
+# ===== CONFIG =====
 
 EMAIL = "haanhtuanetsy@gmail.com"
 PASSWORD = "slzzfsvttjqpjykt"
@@ -11,20 +14,9 @@ BOT_TOKEN = "8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
 CHAT_ID = "7242802148"
 
 
-def send_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+# ===== TELEGRAM SEND PHOTO =====
 
-    requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
-    )
-
-
-def send_photo(photo_url, caption):
+def send_photo(photo, caption):
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
@@ -32,16 +24,18 @@ def send_photo(photo_url, caption):
         url,
         data={
             "chat_id": CHAT_ID,
-            "photo": photo_url,
+            "photo": photo,
             "caption": caption,
             "parse_mode": "HTML"
         }
     )
 
 
-def extract(pattern, text):
+# ===== REGEX HELPER =====
 
-    match = re.search(pattern, text)
+def extract(regex, text):
+
+    match = re.search(regex, text, re.I)
 
     if match:
         return match.group(1).strip()
@@ -49,27 +43,82 @@ def extract(pattern, text):
     return "Unknown"
 
 
-def parse_products(text):
+# ===== GET HTML EMAIL =====
 
-    products = []
+def get_html(msg):
 
-    matches = re.findall(r"Transaction ID:\s*(\d+)", text)
+    html = None
 
-    for m in matches:
-        products.append(m)
+    if msg.is_multipart():
 
-    return products
+        for part in msg.walk():
+
+            if part.get_content_type() == "text/html":
+
+                payload = part.get_payload(decode=True)
+
+                if payload:
+                    html = payload.decode(errors="ignore")
+
+    else:
+
+        payload = msg.get_payload(decode=True)
+
+        if payload:
+            html = payload.decode(errors="ignore")
+
+    return html
 
 
-def find_image(text):
+# ===== PARSE ETSY EMAIL =====
 
-    match = re.search(r'(https://i\.etsystatic\.com/[^\s"]+)', text)
+def parse_etsy(html):
 
-    if match:
-        return match.group(1)
+    soup = BeautifulSoup(html, "html.parser")
 
-    return None
+    text = soup.get_text(" ")
 
+    # Buyer
+    buyer = extract(r"Buyer\s*:\s*(.*?)\s", text)
+
+    # Total
+    total = extract(r"Order total\s*\$?([\d\.,]+)", text)
+
+    # Shipping
+    shipping = extract(r"Ship to\s*(.*?)\s", text)
+
+    # Transaction
+    transaction = extract(r"Transaction ID:\s*(\d+)", text)
+
+    # Shop name
+    shop = extract(r"Shop\s*:\s*(.*?)\s", text)
+
+    # Product title
+    title = extract(r"Item\s*:\s*(.*?)\s", text)
+
+    # PERSONALIZATION
+    personalization = extract(r"Personalization\s*:\s*(.*?)\s{2,}", text)
+
+    if personalization == "Unknown":
+        personalization = extract(r"Personalization\s*(.*?)\s{2,}", text)
+
+    # IMAGE HD
+    img = None
+
+    for i in soup.find_all("img"):
+
+        src = i.get("src")
+
+        if src and "etsy" in src:
+
+            img = src.replace("il_75x75", "il_570xN")
+
+            break
+
+    return buyer, total, shipping, transaction, shop, title, img, personalization
+
+
+# ===== CHECK ETSY ORDERS =====
 
 def check_orders():
 
@@ -79,86 +128,65 @@ def check_orders():
 
     mail.select("inbox")
 
-    status, messages = mail.search(
+    status, data = mail.search(
         None,
         '(UNSEEN SUBJECT "You made a sale on Etsy")'
     )
 
-    mail_ids = messages[0].split()
+    ids = data[0].split()
 
-    for num in mail_ids:
+    for num in ids:
 
-        status, data = mail.fetch(num, "(RFC822)")
+        status, msg_data = mail.fetch(num, "(RFC822)")
 
-        raw_email = data[0][1]
+        raw = msg_data[0][1]
 
-        msg = email.message_from_bytes(raw_email)
+        msg = email.message_from_bytes(raw)
 
-        html = ""
+        html = get_html(msg)
 
-        if msg.is_multipart():
-
-            for part in msg.walk():
-
-                if part.get_content_type() == "text/html":
-
-                    payload = part.get_payload(decode=True)
-
-                    if payload:
-                        html = payload.decode(errors="ignore")
-
-        else:
-
-            payload = msg.get_payload(decode=True)
-
-            if payload:
-                html = payload.decode(errors="ignore")
-
-        if html == "":
+        if not html:
             continue
 
-        buyer = extract(r'Buyer:\s*</strong>\s*(.*?)<', html)
-
-        total = extract(r'Order total:\s*</strong>\s*\$?(.*?)<', html)
-
-        transaction = extract(r'Transaction ID:\s*(\d+)', html)
-
-        address = extract(r'Ship to:\s*</strong>\s*(.*?)<', html)
-
-        products = parse_products(html)
-
-        image = find_image(html)
+        buyer, total, shipping, transaction, shop, title, img, personalization = parse_etsy(html)
 
         order_link = f"https://www.etsy.com/your/orders/sold?transaction_id={transaction}"
 
-        text = f"""
+        caption = f"""
 🛒 <b>NEW ETSY ORDER</b>
 
-👤 Buyer: {buyer}
+🏪 <b>Shop:</b>
+{shop}
 
-📦 Transaction:
-{transaction}
+📦 <b>Product:</b>
+{title}
 
-💰 Total:
+✏️ <b>Personalization:</b>
+{personalization}
+
+👤 <b>Buyer:</b>
+{buyer}
+
+💰 <b>Total:</b>
 ${total}
 
-🏠 Shipping:
-{address}
+🏠 <b>Shipping:</b>
+{shipping}
 
-🔗 Order:
+🔢 <b>Transaction:</b>
+{transaction}
+
+🔗 <b>Order Link:</b>
 {order_link}
 """
 
-        if image:
-
-            send_photo(image, text)
-
-        else:
-
-            send_message(text)
+        if img:
+            send_photo(img, caption)
 
     mail.logout()
 
+
+# ===== LOOP =====
 
 while True:
 

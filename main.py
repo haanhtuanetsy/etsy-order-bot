@@ -2,37 +2,16 @@ import imaplib
 import email
 import requests
 import time
-import os
 import re
-from bs4 import BeautifulSoup
 
-EMAIL="haanhtuanetsy@gmail.com"
-PASSWORD="unaciiagaapxsoux"
+EMAIL = "haanhtuanetsy@gmail.com"
+PASSWORD = "unaciiagaapxsouxD"
 
-BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
-CHAT_ID="7242802148"
-
-
-processed_orders = set()
-
-
-def send_photo(photo, caption):
-
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-
-    requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "photo": photo,
-            "caption": caption,
-            "parse_mode": "HTML"
-        }
-    )
+BOT_TOKEN = "8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
+CHAT_ID = "7242802148"
 
 
 def send_message(text):
-
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     requests.post(
@@ -45,80 +24,51 @@ def send_message(text):
     )
 
 
-def extract_between(text, start, end):
+def send_photo(photo_url, caption):
 
-    try:
-        return text.split(start)[1].split(end)[0].strip()
-    except:
-        return "Unknown"
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+
+    requests.post(
+        url,
+        data={
+            "chat_id": CHAT_ID,
+            "photo": photo_url,
+            "caption": caption,
+            "parse_mode": "HTML"
+        }
+    )
 
 
-def parse_email(html):
+def extract(pattern, text):
 
-    soup = BeautifulSoup(html, "html.parser")
+    match = re.search(pattern, text)
 
-    text = soup.get_text("\n")
+    if match:
+        return match.group(1).strip()
 
-    # Buyer name
-    buyer = "Unknown"
-    if "Order from" in text:
-        buyer = extract_between(text, "Order from", "\n")
+    return "Unknown"
 
-    # Transaction ID
-    transaction = extract_between(text, "Transaction ID:", "\n")
 
-    # Order total
-    total = extract_between(text, "Order total:", "\n")
+def parse_products(text):
 
-    # Shipping
-    shipping = extract_between(text, "Shipping:", "\n")
-
-    # Shipping address
-    address = "Unknown"
-    if "Ship to:" in text:
-        address = extract_between(text, "Ship to:", "Order total")
-
-    # Order link
-    order_link = None
-    for a in soup.find_all("a", href=True):
-
-        if "etsy.com/your/orders" in a["href"]:
-            order_link = a["href"]
-
-    # Products
     products = []
 
-    product_blocks = text.split("Quantity:")
+    matches = re.findall(r"Transaction ID:\s*(\d+)", text)
 
-    for block in product_blocks[1:]:
+    for m in matches:
+        products.append(m)
 
-        name = block.split("\n")[0].strip()
+    return products
 
-        quantity = extract_between(block, "", "\n")
 
-        price = "Unknown"
-        if "Price:" in block:
-            price = extract_between(block, "Price:", "\n")
+def find_image(text):
 
-        size = "Unknown"
-        if "SIZE" in block:
-            size = extract_between(block, "SIZE", "\n")
+    match = re.search(r'(https://i\.etsystatic\.com/[^\s"]+)', text)
 
-        products.append({
-            "name": name,
-            "quantity": quantity,
-            "price": price,
-            "size": size
-        })
+    if match:
+        return match.group(1)
 
-    # Image
-    image = None
-    img = soup.find("img")
-
-    if img:
-        image = img.get("src")
-
-    return buyer, transaction, total, shipping, address, order_link, products, image
+    return None
 
 
 def check_orders():
@@ -131,20 +81,20 @@ def check_orders():
 
     status, messages = mail.search(
         None,
-        '(UNSEEN FROM "transaction@etsy.com")'
+        '(UNSEEN SUBJECT "You made a sale on Etsy")'
     )
 
-    ids = messages[0].split()
+    mail_ids = messages[0].split()
 
-    for num in ids:
+    for num in mail_ids:
 
         status, data = mail.fetch(num, "(RFC822)")
 
-        raw = data[0][1]
+        raw_email = data[0][1]
 
-        msg = email.message_from_bytes(raw)
+        msg = email.message_from_bytes(raw_email)
 
-        html = None
+        html = ""
 
         if msg.is_multipart():
 
@@ -152,68 +102,60 @@ def check_orders():
 
                 if part.get_content_type() == "text/html":
 
-                    html = part.get_payload(decode=True).decode()
+                    payload = part.get_payload(decode=True)
+
+                    if payload:
+                        html = payload.decode(errors="ignore")
 
         else:
 
-            html = msg.get_payload(decode=True).decode()
+            payload = msg.get_payload(decode=True)
 
-        if not html:
+            if payload:
+                html = payload.decode(errors="ignore")
+
+        if html == "":
             continue
 
-        buyer, transaction, total, shipping, address, order_link, products, image = parse_email(html)
+        buyer = extract(r'Buyer:\s*</strong>\s*(.*?)<', html)
 
-        if transaction in processed_orders:
-            continue
+        total = extract(r'Order total:\s*</strong>\s*\$?(.*?)<', html)
 
-        processed_orders.add(transaction)
+        transaction = extract(r'Transaction ID:\s*(\d+)', html)
 
-        product_text = ""
+        address = extract(r'Ship to:\s*</strong>\s*(.*?)<', html)
 
-        for p in products:
+        products = parse_products(html)
 
-            product_text += f"""
-📦 <b>{p['name']}</b>
-📏 Size: {p['size']}
-📦 Qty: {p['quantity']}
-💰 Price: {p['price']}
+        image = find_image(html)
 
-"""
+        order_link = f"https://www.etsy.com/your/orders/sold?transaction_id={transaction}"
 
-        caption = f"""
+        text = f"""
 🛒 <b>NEW ETSY ORDER</b>
 
-👤 <b>Buyer</b>
-{buyer}
+👤 Buyer: {buyer}
 
-📍 <b>Shipping Address</b>
+📦 Transaction:
+{transaction}
+
+💰 Total:
+${total}
+
+🏠 Shipping:
 {address}
 
-{product_text}
-
-🚚 <b>Shipping</b>
-{shipping}
-
-💵 <b>Order Total</b>
-{total}
-
-🆔 <b>Transaction</b>
-{transaction}
+🔗 Order:
+{order_link}
 """
-
-        if order_link:
-
-            caption += f'\n🔗 <a href="{order_link}">Open Order</a>'
 
         if image:
 
-            send_photo(image, caption)
+            send_photo(image, text)
 
         else:
 
-            send_message(caption)
-
-        mail.store(num, '+FLAGS', '\\Seen')
+            send_message(text)
 
     mail.logout()
 
@@ -222,12 +164,12 @@ while True:
 
     try:
 
-        check_orders()
-
         print("Checking Etsy orders...")
+
+        check_orders()
 
     except Exception as e:
 
         print("Error:", e)
 
-    time.sleep(20)
+    time.sleep(60)

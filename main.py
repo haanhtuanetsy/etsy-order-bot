@@ -54,13 +54,35 @@ def check_orders():
 
         msg=email.message_from_bytes(raw)
 
+        html=""
         body=""
 
+        image_map={}  # lưu cid -> ảnh
+
         if msg.is_multipart():
+
             for part in msg.walk():
-                if part.get_content_type()=="text/plain":
+
+                content_type=part.get_content_type()
+
+                # ===== lấy HTML =====
+                if content_type=="text/html":
+                    html=part.get_payload(decode=True).decode(errors="ignore")
+
+                # ===== lấy text =====
+                if content_type=="text/plain" and not body:
                     body=part.get_payload(decode=True).decode(errors="ignore")
-                    break
+
+                # ===== lấy ảnh CID =====
+                if content_type.startswith("image/"):
+
+                    cid=part.get("Content-ID")
+
+                    if cid:
+                        cid=cid.replace("<","").replace(">","")
+
+                        image_map[cid]=part.get_payload(decode=True)
+
         else:
             body=msg.get_payload(decode=True).decode(errors="ignore")
 
@@ -73,9 +95,9 @@ def check_orders():
         if shop_match:
             shop=shop_match.group(1).strip()
 
-        # ===== ORDER TOTAL =====
+        # ===== TOTAL =====
         total="N/A"
-        total_match=re.search(r'Order total:\s*([\d,\.đ]+)', body)
+        total_match=re.search(r'Order total:\s*([\d,\.đ$]+)', body)
         if total_match:
             total=total_match.group(1)
 
@@ -87,29 +109,32 @@ def check_orders():
 
         # ===== SHIPPING =====
         shipping="N/A"
-        ship_match=re.search(r'Shipping address:\s*(.+)', body)
+        ship_match=re.search(r'Shipping.*?:\s*(.+)', body)
         if ship_match:
             shipping=ship_match.group(1).strip()
 
-        # ===== LẤY ẢNH ĐÚNG =====
+        # ===== TÌM ẢNH TRONG HTML =====
         image_bytes=None
-        biggest_size=0
 
-        if msg.is_multipart():
+        # tìm cid trong html
+        cid_match=re.search(r'cid:(.*?)"', html)
 
-            for part in msg.walk():
+        if cid_match:
+            cid=cid_match.group(1)
 
-                if part.get_content_type().startswith("image/"):
+            if cid in image_map:
+                image_bytes=image_map[cid]
 
-                    img=part.get_payload(decode=True)
+        # fallback: lấy ảnh lớn nhất nếu không match cid
+        if not image_bytes:
 
-                    if img:
-                        size=len(img)
+            biggest=0
 
-                        # lấy ảnh lớn nhất (product)
-                        if size > biggest_size:
-                            biggest_size=size
-                            image_bytes=img
+            for cid,img in image_map.items():
+
+                if img and len(img) > biggest:
+                    biggest=len(img)
+                    image_bytes=img
 
         # ===== MESSAGE =====
         caption=f"""{product}

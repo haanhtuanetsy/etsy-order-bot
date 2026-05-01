@@ -11,143 +11,138 @@ BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
 CHAT_ID="7242802148"
 
 
-def send_photo_file(image_bytes, caption):
 
-    url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-
-    files={
-        "photo":("image.jpg", image_bytes)
-    }
+def send_photo(image_bytes, caption):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
     requests.post(
         url,
-        data={"chat_id":CHAT_ID, "caption":caption},
-        files=files
+        data={
+            "chat_id": CHAT_ID,
+            "caption": caption
+        },
+        files={
+            "photo": ("image.jpg", image_bytes)
+        }
     )
 
 
 def send_text(text):
-
-    url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     requests.post(url, data={
-        "chat_id":CHAT_ID,
-        "text":text
+        "chat_id": CHAT_ID,
+        "text": text
     })
+
+
+def extract_info(body):
+    # ===== TITLE =====
+    lines = body.strip().split("\n")
+    product = lines[0] if lines else "Unknown product"
+
+    # ===== SHOP =====
+    shop = "N/A"
+    m = re.search(r'Shop:\s*(.+)', body)
+    if m:
+        shop = m.group(1).strip()
+
+    # ===== ORDER TOTAL =====
+    total = "N/A"
+    m = re.search(r'Order total:\s*([\d,\.đ$]+)', body)
+    if m:
+        total = m.group(1)
+
+    # ===== PERSONALIZATION =====
+    personalization = "N/A"
+    m = re.search(r'Personalization:\s*(.+)', body)
+    if m:
+        personalization = m.group(1).strip()
+
+    # ===== SHIPPING =====
+    shipping = "N/A"
+    m = re.search(r'Shipping.*?:\s*(.+)', body)
+    if m:
+        shipping = m.group(1).strip()
+
+    return product, shop, total, personalization, shipping
+
+
+def extract_image(msg):
+    image_bytes = None
+    biggest = 0
+
+    if msg.is_multipart():
+        for part in msg.walk():
+
+            content_type = part.get_content_type()
+
+            # chỉ cần là image là lấy
+            if content_type.startswith("image/"):
+
+                img = part.get_payload(decode=True)
+
+                if img:
+                    size = len(img)
+
+                    print("Image size:", size)
+
+                    # lọc ảnh nhỏ (icon)
+                    if size > biggest and size > 5000:
+                        biggest = size
+                        image_bytes = img
+
+    return image_bytes
 
 
 def check_orders():
 
-    mail=imaplib.IMAP4_SSL("imap.gmail.com")
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
     mail.login(EMAIL, PASSWORD)
     mail.select("inbox")
 
-    status,messages=mail.search(
+    status, messages = mail.search(
         None,
         '(UNSEEN SUBJECT "You made a sale on Etsy")'
     )
 
     for num in messages[0].split():
 
-        status,data=mail.fetch(num,"(RFC822)")
-        raw=data[0][1]
+        status, data = mail.fetch(num, "(RFC822)")
+        raw = data[0][1]
 
-        msg=email.message_from_bytes(raw)
+        msg = email.message_from_bytes(raw)
 
-        html=""
-        body=""
-
-        image_map={}  # lưu cid -> ảnh
+        body = ""
 
         if msg.is_multipart():
-
             for part in msg.walk():
-
-                content_type=part.get_content_type()
-
-                # ===== lấy HTML =====
-                if content_type=="text/html":
-                    html=part.get_payload(decode=True).decode(errors="ignore")
-
-                # ===== lấy text =====
-                if content_type=="text/plain" and not body:
-                    body=part.get_payload(decode=True).decode(errors="ignore")
-
-                # ===== lấy ảnh CID =====
-                if content_type.startswith("image/"):
-
-                    cid=part.get("Content-ID")
-
-                    if cid:
-                        cid=cid.replace("<","").replace(">","")
-
-                        image_map[cid]=part.get_payload(decode=True)
-
+                if part.get_content_type() == "text/plain":
+                    body = part.get_payload(decode=True).decode(errors="ignore")
+                    break
         else:
-            body=msg.get_payload(decode=True).decode(errors="ignore")
+            body = msg.get_payload(decode=True).decode(errors="ignore")
 
-        # ===== TITLE =====
-        product=body.strip().split("\n")[0]
+        # ===== LẤY THÔNG TIN =====
+        product, shop, total, personalization, shipping = extract_info(body)
 
-        # ===== SHOP =====
-        shop="Unknown"
-        shop_match=re.search(r'Shop:\s*(.+)', body)
-        if shop_match:
-            shop=shop_match.group(1).strip()
+        # ===== LẤY ẢNH =====
+        image_bytes = extract_image(msg)
 
-        # ===== TOTAL =====
-        total="N/A"
-        total_match=re.search(r'Order total:\s*([\d,\.đ$]+)', body)
-        if total_match:
-            total=total_match.group(1)
-
-        # ===== PERSONALIZATION =====
-        personalization="N/A"
-        p_match=re.search(r'Personalization:\s*(.+)', body)
-        if p_match:
-            personalization=p_match.group(1).strip()
-
-        # ===== SHIPPING =====
-        shipping="N/A"
-        ship_match=re.search(r'Shipping.*?:\s*(.+)', body)
-        if ship_match:
-            shipping=ship_match.group(1).strip()
-
-        # ===== TÌM ẢNH TRONG HTML =====
-        image_bytes=None
-
-        # tìm cid trong html
-        cid_match=re.search(r'cid:(.*?)"', html)
-
-        if cid_match:
-            cid=cid_match.group(1)
-
-            if cid in image_map:
-                image_bytes=image_map[cid]
-
-        # fallback: lấy ảnh lớn nhất nếu không match cid
-        if not image_bytes:
-
-            biggest=0
-
-            for cid,img in image_map.items():
-
-                if img and len(img) > biggest:
-                    biggest=len(img)
-                    image_bytes=img
-
-        # ===== MESSAGE =====
-        caption=f"""{product}
+        # ===== FORMAT TEXT =====
+        caption = f"""{product}
 
 Shop: {shop}
 Order total: {total}
 Personalization: {personalization}
 Shipping: {shipping}"""
 
-        # ===== SEND =====
+        # ===== GỬI TELEGRAM =====
         if image_bytes:
-            send_photo_file(image_bytes, caption)
+            print("Sending PHOTO...")
+            send_photo(image_bytes, caption)
         else:
+            print("NO IMAGE → sending TEXT")
             send_text(caption)
 
     mail.logout()
@@ -158,6 +153,6 @@ while True:
         check_orders()
         print("Checking...")
     except Exception as e:
-        print(e)
+        print("ERROR:", e)
 
     time.sleep(120)

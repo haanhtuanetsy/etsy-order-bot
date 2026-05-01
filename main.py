@@ -30,13 +30,10 @@ def send_text(text):
 
     url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-    requests.post(
-        url,
-        data={
-            "chat_id":CHAT_ID,
-            "text":text
-        }
-    )
+    requests.post(url, data={
+        "chat_id":CHAT_ID,
+        "text":text
+    })
 
 
 def check_orders():
@@ -67,10 +64,10 @@ def check_orders():
         else:
             body=msg.get_payload(decode=True).decode(errors="ignore")
 
-        # ===== PRODUCT TITLE =====
+        # ===== TITLE =====
         product=body.strip().split("\n")[0]
 
-        # ===== SHOP NAME =====
+        # ===== SHOP =====
         shop="Unknown"
         shop_match=re.search(r'Shop:\s*(.+)', body)
         if shop_match:
@@ -82,28 +79,45 @@ def check_orders():
         if total_match:
             total=total_match.group(1)
 
-        # ===== LẤY ẢNH NHÚNG =====
+        # ===== PERSONALIZATION =====
+        personalization="N/A"
+        p_match=re.search(r'Personalization:\s*(.+)', body)
+        if p_match:
+            personalization=p_match.group(1).strip()
+
+        # ===== SHIPPING =====
+        shipping="N/A"
+        ship_match=re.search(r'Shipping address:\s*(.+)', body)
+        if ship_match:
+            shipping=ship_match.group(1).strip()
+
+        # ===== LẤY ẢNH ĐÚNG =====
         image_bytes=None
+        biggest_size=0
 
         if msg.is_multipart():
+
             for part in msg.walk():
 
-                content_type=part.get_content_type()
-
-                if content_type.startswith("image/"):
+                if part.get_content_type().startswith("image/"):
 
                     img=part.get_payload(decode=True)
 
-                    if img and len(img) > 20000:  # lọc ảnh nhỏ (logo)
+                    if img:
+                        size=len(img)
 
-                        image_bytes=img
-                        break
+                        # lấy ảnh lớn nhất (product)
+                        if size > biggest_size:
+                            biggest_size=size
+                            image_bytes=img
 
-        # ===== FORMAT TELEGRAM =====
-        caption=f"""{product[:80]}
+        # ===== MESSAGE =====
+        caption=f"""{product}
 
-🏪 {shop}
-💰 {total}"""
+Shop: {shop}
+Order total: {total}
+Personalization: {personalization}
+Shipping: {shipping}"""
 
         # ===== SEND =====
         if image_bytes:

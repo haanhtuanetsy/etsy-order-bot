@@ -1,271 +1,124 @@
 import imaplib
 import email
-import os
-import time
 import requests
-from bs4 import BeautifulSoup
+import time
+import re
 
-EMAIL = os.environ.get("haanhtuanetsy@gmail.com")
-PASSWORD = os.environ.get("lgjuymixrdsvkmvp")
-BOT_TOKEN = os.environ.get("8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY")
-CHAT_ID = os.environ.get("7242802148")
+EMAIL="haanhtuanetsy@gmail.com"
+PASSWORD="aucelfgaxefsfhoc"
+
+BOT_TOKEN="8687189308:AAG0IKJPF84WnsXB6DxGKvcltu81222njzY"
+CHAT_ID="7242802148"
 
 
-def send_message(text):
+def send_photo_file(image_bytes, caption):
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+
+    files={
+        "photo":("image.jpg", image_bytes)
+    }
+
+    requests.post(
+        url,
+        data={"chat_id":CHAT_ID, "caption":caption},
+        files=files
+    )
+
+
+def send_text(text):
+
+    url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     requests.post(
         url,
         data={
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
+            "chat_id":CHAT_ID,
+            "text":text
         }
     )
-
-
-def send_photo(photo, caption):
-
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-
-    requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "photo": photo,
-            "caption": caption,
-            "parse_mode": "HTML"
-        }
-    )
-
-
-def get_html(msg):
-
-    html = None
-
-    if msg.is_multipart():
-
-        for part in msg.walk():
-
-            if part.get_content_type() == "text/html":
-
-                html = part.get_payload(decode=True)
-
-                if html:
-
-                    return html.decode(errors="ignore")
-
-    else:
-
-        if msg.get_content_type() == "text/html":
-
-            html = msg.get_payload(decode=True)
-
-            if html:
-
-                return html.decode(errors="ignore")
-
-    return ""
-
-
-def find_product(soup):
-
-    try:
-
-        for tag in soup.find_all(["h1", "h2", "h3"]):
-
-            text = tag.get_text()
-
-            if text and len(text) > 6 and "etsy" not in text.lower():
-
-                return text.strip()
-
-    except:
-        pass
-
-    return "Unknown product"
-
-
-def find_total(lines):
-
-    try:
-
-        for l in lines:
-
-            if "$" in l and "." in l and len(l) < 20:
-
-                return l.strip()
-
-    except:
-        pass
-
-    return "Unknown"
-
-
-def find_personalization(lines):
-
-    try:
-
-        for l in lines:
-
-            if "personalization" in l.lower():
-
-                return l
-
-    except:
-        pass
-
-    return "None"
-
-
-def find_shipping(lines):
-
-    try:
-
-        start = False
-        addr = []
-
-        for l in lines:
-
-            if "ship to" in l.lower() or "shipping address" in l.lower():
-
-                start = True
-                continue
-
-            if start:
-
-                if len(addr) < 6:
-
-                    addr.append(l)
-
-                else:
-
-                    break
-
-        if addr:
-
-            return "\n".join(addr)
-
-    except:
-        pass
-
-    return "Unknown"
-
-
-def find_image(soup):
-
-    try:
-
-        for img in soup.find_all("img"):
-
-            src = img.get("src")
-
-            if not src:
-                continue
-
-            if "etsyimg.com" in src:
-
-                return src
-
-    except:
-        pass
-
-    return None
-
-
-def parse_email(html):
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    text = soup.get_text("\n")
-
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-    product = find_product(soup)
-
-    total = find_total(lines)
-
-    personalization = find_personalization(lines)
-
-    shipping = find_shipping(lines)
-
-    image = find_image(soup)
-
-    return product, total, personalization, shipping, image
 
 
 def check_orders():
 
-    mail = imaplib.IMAP4_SSL("imap.gmail.com")
-
+    mail=imaplib.IMAP4_SSL("imap.gmail.com")
     mail.login(EMAIL, PASSWORD)
-
     mail.select("inbox")
 
-    status, data = mail.search(None, '(UNSEEN FROM "etsy")')
+    status,messages=mail.search(
+        None,
+        '(UNSEEN SUBJECT "You made a sale on Etsy")'
+    )
 
-    ids = data[0].split()
+    for num in messages[0].split():
 
-    for num in ids:
+        status,data=mail.fetch(num,"(RFC822)")
+        raw=data[0][1]
 
-        status, msg_data = mail.fetch(num, "(RFC822)")
+        msg=email.message_from_bytes(raw)
 
-        raw_email = msg_data[0][1]
+        body=""
 
-        msg = email.message_from_bytes(raw_email)
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type()=="text/plain":
+                    body=part.get_payload(decode=True).decode(errors="ignore")
+                    break
+        else:
+            body=msg.get_payload(decode=True).decode(errors="ignore")
 
-        html = get_html(msg)
+        # ===== PRODUCT TITLE =====
+        product=body.strip().split("\n")[0]
 
-        if not html:
+        # ===== SHOP NAME =====
+        shop="Unknown"
+        shop_match=re.search(r'Shop:\s*(.+)', body)
+        if shop_match:
+            shop=shop_match.group(1).strip()
 
-            continue
+        # ===== ORDER TOTAL =====
+        total="N/A"
+        total_match=re.search(r'Order total:\s*([\d,\.đ]+)', body)
+        if total_match:
+            total=total_match.group(1)
 
-        product, total, personalization, shipping, image = parse_email(html)
+        # ===== LẤY ẢNH NHÚNG =====
+        image_bytes=None
 
-        caption = f"""
-🛒 <b>NEW ETSY ORDER</b>
+        if msg.is_multipart():
+            for part in msg.walk():
 
-📦 Product:
-{product}
+                content_type=part.get_content_type()
 
-✏️ Personalization:
-{personalization}
+                if content_type.startswith("image/"):
 
-💰 Total:
-{total}
+                    img=part.get_payload(decode=True)
 
-🏠 Shipping address:
-{shipping}
-"""
+                    if img and len(img) > 20000:  # lọc ảnh nhỏ (logo)
 
-        try:
+                        image_bytes=img
+                        break
 
-            if image:
+        # ===== FORMAT TELEGRAM =====
+        caption=f"""{product[:80]}
 
-                send_photo(image, caption)
+🏪 {shop}
+💰 {total}"""
 
-            else:
-
-                send_message(caption)
-
-        except Exception as e:
-
-            print("Send error:", e)
+        # ===== SEND =====
+        if image_bytes:
+            send_photo_file(image_bytes, caption)
+        else:
+            send_text(caption)
 
     mail.logout()
 
 
 while True:
-
     try:
-
-        print("Checking Etsy orders...")
-
         check_orders()
-
+        print("Checking...")
     except Exception as e:
+        print(e)
 
-        print("Error:", e)
-
-    time.sleep(60)
+    time.sleep(120)
